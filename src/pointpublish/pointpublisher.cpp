@@ -1,8 +1,13 @@
 #include <iostream>
 #include <ros/ros.h>
+#include <tf/transform_broadcaster.h>
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <sensor_msgs/PointCloud2.h>
+
+#include <turtlesim/Pose.h>
+
+#if 0
 int main(int argc, char **argv)
 {
     ros::init(argc,argv,"point_cloud_node");
@@ -47,3 +52,52 @@ int main(int argc, char **argv)
 
     return 0;
 }
+#else
+
+void posecallback(const turtlesim::PoseConstPtr& msg)
+{
+    static tf::TransformBroadcaster br;
+
+    tf::Transform trans;
+
+    trans.setOrigin(tf::Vector3(msg->x,msg->y,0.0));
+
+    tf::Quaternion qua;
+
+    qua.setRPY(0,0,msg->theta);
+
+    trans.setRotation(qua);
+
+    br.sendTransform(tf::StampedTransform(trans,ros::Time::now(),"world","turtle1"));
+}
+
+int main(int argc, char **argv)
+{
+    ros::init(argc, argv, "tfexample");
+    ros::NodeHandle node;
+
+    ros::Rate rate(10);
+    //ros::WallRate rate(100);
+    tf::TransformBroadcaster br;
+    tf::Transform trans;
+    trans.setOrigin(tf::Vector3(20,10,0));
+
+    tf::Quaternion qua;
+
+    qua.setRPY(0,0,0);
+
+    trans.setRotation(qua);
+
+    while(node.ok())
+    {
+        #if 0
+        ros::WallTime wt = ros::WallTime::now();
+        br.sendTransform(tf::StampedTransform(trans,ros::Time(wt.sec, wt.nsec),"map","velodyne"));
+        #else
+        br.sendTransform(tf::StampedTransform(trans,ros::Time::now(),"map","velodyne"));
+        #endif
+        rate.sleep();
+    }
+    return 0;
+}
+#endif

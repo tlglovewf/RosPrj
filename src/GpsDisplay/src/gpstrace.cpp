@@ -2,6 +2,7 @@
 #include <pcl_conversions/pcl_conversions.h>
 #include <sensor_msgs/NavSatFix.h>
 #include "Functions.h"
+#include "tf/transform_broadcaster.h"
 #include <iostream>
 #include <string>
    // 建立 pcl 点云
@@ -23,11 +24,11 @@ void gpsdatacallback(const sensor_msgs::NavSatFix& data)
         first = false;
     }
 
-    std::string info =  std::to_string(Functions::mector_lon(data.longitude)) + " >< " + std::to_string(Functions::mector_lat(data.latitude)) + "!" ;
-    ROS_INFO(info.c_str());
-
-    info =  std::to_string(data.longitude) + " = " + std::to_string(data.latitude) + "!" ;
-    ROS_INFO(info.c_str());
+    //std::string info =  std::to_string(Functions::mector_lon(data.longitude)) + " >< " + std::to_string(Functions::mector_lat(data.latitude)) + "!" ;
+    //ROS_INFO(info.c_str());
+    //
+    //info =  std::to_string(data.longitude) + " = " + std::to_string(data.latitude) + "!" ;
+    //ROS_INFO(info.c_str());
 
     point.x = Functions::mector_lon(data.longitude) - ori_x;
     point.y = Functions::mector_lat(data.latitude)  - ori_y;
@@ -35,7 +36,7 @@ void gpsdatacallback(const sensor_msgs::NavSatFix& data)
     point.r = 0.0;
     point.g = 255.0;
     point.b = 0.0;
-
+    
     cloud.points.push_back(point);
 }
 

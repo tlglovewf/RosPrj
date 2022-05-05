@@ -1,4 +1,5 @@
 build
+browse.vc.db*
 logs
 devel
 .catkin_tools
