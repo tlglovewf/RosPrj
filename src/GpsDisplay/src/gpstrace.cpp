@@ -3,35 +3,31 @@
 #include <sensor_msgs/NavSatFix.h>
 #include "Functions.h"
 #include "tf/transform_broadcaster.h"
+#include "nmea_msgs/Gprmc.h"
+#include "nmea_msgs/Sentence.h"
 #include <iostream>
 #include <string>
+#include <vector>
+#include <regex>
    // 建立 pcl 点云
 pcl::PointCloud<pcl::PointXYZRGB> cloud;
 
-void gpsdatacallback(const sensor_msgs::NavSatFix& data)
+
+static void pushgpspt(double lon , double lat, bool& isfirst)
 {
-   
-    static bool first = true;
     pcl::PointXYZRGB point;
 
     static int ori_x = 0;
     static int ori_y = 0;
 
-    if(first)
+    if(isfirst)
     {
-        ori_x = Functions::mector_lon(data.longitude);
-        ori_y = Functions::mector_lat(data.latitude) ;
-        first = false;
-    }
-
-    //std::string info =  std::to_string(Functions::mector_lon(data.longitude)) + " >< " + std::to_string(Functions::mector_lat(data.latitude)) + "!" ;
-    //ROS_INFO(info.c_str());
-    //
-    //info =  std::to_string(data.longitude) + " = " + std::to_string(data.latitude) + "!" ;
-    //ROS_INFO(info.c_str());
-
-    point.x = Functions::mector_lon(data.longitude) - ori_x;
-    point.y = Functions::mector_lat(data.latitude)  - ori_y;
+        ori_x = Functions::mector_lon(lon);
+        ori_y = Functions::mector_lat(lat);
+        isfirst = false;
+    } 
+    point.x = Functions::mector_lon(lon) - ori_x;
+    point.y = Functions::mector_lat(lat) - ori_y;
     point.z = 0.0;
     point.r = 0.0;
     point.g = 255.0;
@@ -40,20 +36,88 @@ void gpsdatacallback(const sensor_msgs::NavSatFix& data)
     cloud.points.push_back(point);
 }
 
+void gpsdatacallback(const sensor_msgs::NavSatFix& data)
+{
+    static bool isfirst = true;
+    pushgpspt(data.longitude,data.latitude,isfirst);
+}
+
+
+std::vector<std::string> splitSV(std::string strv, std::string delims = " ")
+{
+	std::vector<std::string> output;
+	size_t first = 0;
+
+	while (first < strv.size())
+	{
+		const auto second = strv.find_first_of(delims, first);
+
+		if (first != second)
+			output.emplace_back(strv.substr(first, second - first));
+
+		if (second == std::string::npos)
+			break;
+
+		first = second + 1;
+	}
+
+	return output;
+}
+
+void gprmccallback(const nmea_msgs::Sentence& data)
+{
+    static bool isfirst = true;
+    //ROS_INFO(data.sentence.c_str());//info.c_str());
+    static const std::regex rgx("^\\$GPRMC,[\\d\\.]*,[A|V],(-?[0-9]*\\.?[0-9]+),([NS]*),(-?[0-9]*\\.?[0-9]+),([EW]*),.*");
+
+    if(std::regex_match(data.sentence,rgx))
+    {
+       
+       auto values = splitSV(data.sentence,",");
+       
+       std::string str = values[3] + "--" + values[5];
+       double lon = atof(values[5].c_str()) * 0.01;
+       double lat = atof(values[3].c_str()) * 0.01;
+       if(values[4] == "S")
+        {
+            lat *= -1;
+        }
+        if(values[6] == "W")
+        {
+            lon *= -1;
+        }
+       lon = 5 / 3.0f * lon - (int)lon / 3.0;
+       lat = 5 / 3.0f * lat - (int)lat / 3.0;
+
+       static double prelon = 0;
+       static double prelat = 0;
+       if(fabs(prelon-lon) < 1e-6 && fabs(prelat-lat) < 1e-6)
+        return;
+       ROS_INFO((std::to_string(lon) + " " + std::to_string(lat)).c_str());
+       pushgpspt(lon,lat,isfirst);
+       prelon = lon;
+       prelat = lat;
+    }
+} 
+
 int main(int argc, char **argv)
 {
     ros::init(argc,argv, "GpsDataHandle");  
 
     ros::NodeHandle handle("~");
     
-    ROS_INFO("begin to get gps data");
+    ROS_INFO("begin to get /gps/fix data");
     
     ros::Publisher  trace = handle.advertise<sensor_msgs::PointCloud2>("/gpscloudtrace",100);
 
-    ros::Subscriber sub = handle.subscribe("/gps/fix",100,gpsdatacallback);
+    ros::Subscriber sub = handle.subscribe("/gps/fix",10,gpsdatacallback);
+
+    ROS_INFO("begin to get nmea data");
+
+    ros::Subscriber gpssub = handle.subscribe("/nmea_sentence",100,gprmccallback);
 
     ros::Rate rate(100);
-
+    //ros::WallRate rate(100);
     while(ros::ok())
     {
         ros::spinOnce();
