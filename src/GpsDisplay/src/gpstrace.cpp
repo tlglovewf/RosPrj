@@ -1,6 +1,7 @@
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <sensor_msgs/NavSatFix.h>
+#include <sensor_msgs/Imu.h>
 #include "Functions.h"
 #include "tf/transform_broadcaster.h"
 #include "nmea_msgs/Gprmc.h"
@@ -9,6 +10,7 @@
 #include <string>
 #include <vector>
 #include <regex>
+#include <sstream>
    // 建立 pcl 点云
 pcl::PointCloud<pcl::PointXYZRGB> cloud;
 
@@ -100,6 +102,19 @@ void gprmccallback(const nmea_msgs::Sentence& data)
     }
 } 
 
+
+void imucallback(const sensor_msgs::Imu& data)
+{
+    std::stringstream ss;
+    //ss << data.linear_acceleration.x << " " << data.linear_acceleration.y << " " << data.linear_acceleration.z;
+    ss << data.orientation.x << " " << data.orientation.y << " " << data.orientation.z << " " << data.orientation.w;
+    ROS_INFO(ss.str().c_str());
+
+    //do some point insert
+    
+
+}
+
 int main(int argc, char **argv)
 {
     ros::init(argc,argv, "GpsDataHandle");  
@@ -115,6 +130,8 @@ int main(int argc, char **argv)
     ROS_INFO("begin to get nmea data");
 
     ros::Subscriber gpssub = handle.subscribe("/nmea_sentence",100,gprmccallback);
+
+    ros::Subscriber imusub = handle.subscribe("/imu_raw",100,imucallback);
 
     ros::Rate rate(100);
     //ros::WallRate rate(100);

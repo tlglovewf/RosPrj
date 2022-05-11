@@ -1,0 +1,4 @@
+<launch>
+  <node name="imutrace" pkg="GpsDisplay" type="imu_show_node" output="screen"/>
+<!--  <node name="gpstrace" pkg="GpsDisplay" type="GpsDisplay_node" output="screen"/> -->
+</launch>
