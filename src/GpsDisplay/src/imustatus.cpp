@@ -10,7 +10,10 @@
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
 
+#include <fstream>
 #include <sstream>
+
+
 
 class ImuHandler final
 {
@@ -23,21 +26,22 @@ public:
         _sub = _hdl.subscribe("/imu_raw",10,&ImuHandler::_handleimudata,this);
         #else
         _pub = _hdl.advertise<sensor_msgs::PointCloud2>("imutrace",10);
-        _sub = _hdl.subscribe("/imu_raw",10,&ImuHandler::_calimupose,this);
+        _sub = _hdl.subscribe("/imu/data",10,&ImuHandler::_calimupose,this);
         #endif 
     }
-
-protected:
-
+            
+    //初始速度.姿态.零偏 影响都比较大
     struct ImuStatus
     {
        Eigen::Vector3d      gyro_bias   = Eigen::Vector3d(0,0,0);
        Eigen::Vector3d      acc_bias    = Eigen::Vector3d(0,0,0);
 
        Eigen::Vector3d      pos         = Eigen::Vector3d(0,0,0);
-       Eigen::Vector3d      speed       = Eigen::Vector3d(0,0,0);
-       Eigen::Vector3d      grav        = Eigen::Vector3d(0,0,-9.81);
-       Eigen::Quaterniond   qua         = Eigen::Quaterniond(1,0,0,0);
+
+       Eigen::Vector3d      grav        = Eigen::Vector3d(0,0,9.81);
+
+       Eigen::Vector3d      speed       = Eigen::Vector3d(0,6.28319,3.14159);
+       Eigen::Quaterniond   qua         = Eigen::Quaterniond(0.99875, 0.0499792, 0, 0);
 
        Eigen::Quaterniond   pose        = Eigen::Quaterniond(1,0,0,0);
        //add cov 
@@ -46,10 +50,13 @@ protected:
     struct ImuData
     {
         double          time;
+        Eigen::Vector3d pos;
         Eigen::Vector3d gyro;
         Eigen::Vector3d acc;
-        
     };
+
+public:
+
 
     template <typename Derived>
     static Eigen::Quaternion<typename Derived::Scalar> deltaQ(const Eigen::MatrixBase<Derived> &theta)
@@ -69,31 +76,29 @@ protected:
     void _predictimu(const  ImuData& predata, const ImuData& curdata)
     {
         double dt = curdata.time - predata.time;
-        
+        //中指积分
         Eigen::Vector3d half_gyro = (predata.gyro + curdata.gyro) * 0.5 - imustatus.gyro_bias;  
         
-        
-
-        Eigen::Vector3d un_acc_0 = imustatus.pose * (predata.acc - imustatus.acc_bias) - imustatus.grav ;
+        Eigen::Vector3d un_acc_0 = imustatus.qua * (predata.acc - imustatus.acc_bias) - imustatus.grav ;
 
         imustatus.qua = imustatus.qua * deltaQ(half_gyro * dt);
+        imustatus.qua.normalize();
 
-        Eigen::Vector3d un_acc_1 = imustatus.pose  * (curdata.acc - imustatus.acc_bias) - imustatus.grav;
+        Eigen::Vector3d un_acc_1 = imustatus.qua  * (curdata.acc - imustatus.acc_bias) - imustatus.grav;
 
         Eigen::Vector3d un_acc = 0.5 * (un_acc_0 + un_acc_1);
 
         std::stringstream ss;
-        ss << ">>>>>> " <<  un_acc.x() << " " << un_acc.y() << " " << un_acc.z();
-        // ROS_INFO(ss.str().c_str());
-       
+
+        //长距离 imu pos积分误差大  
         imustatus.pos = imustatus.pos + imustatus.speed * dt + 0.5 * dt * dt * un_acc;
         imustatus.speed = imustatus.speed + un_acc * dt;
-        //imustatus.pos.z() = 0.0;
-        // ss.clear();
-        ss << "++++++ " << imustatus.pos.x() << " " << imustatus.pos.y() << " " << imustatus.pos.z();
+ 
+        ss << imustatus.pos.x() << " " << imustatus.pos.y() << " " << imustatus.pos.z() << std::endl;
+        //_saveimupose(imustatus.pos);
         ROS_INFO(ss.str().c_str());
-       
     }
+    
     void _calimupose(const sensor_msgs::Imu& data)
     {
         static int index = 0;
@@ -105,7 +110,6 @@ protected:
             lastdata.acc  =  Eigen::Vector3d(data.linear_acceleration.x, data.linear_acceleration.y, data.linear_acceleration.z);
             lastdata.gyro =  Eigen::Vector3d(data.angular_velocity.x,data.angular_velocity.y,data.angular_velocity.z);
             lastdata.time =  data.header.stamp.toSec();
-            
             curdata = lastdata;
             return;
         }
@@ -117,7 +121,7 @@ protected:
         }
 
         _predictimu(lastdata,curdata);
-
+        //用于可视化
         pcl::PointXYZRGB point;
         point.x = imustatus.pos.x();
         point.y = imustatus.pos.y();
@@ -137,8 +141,6 @@ protected:
         _pub.publish(output_msg);
         lastdata  = curdata;
     }
-    
-     
     
     //display cur imu status
     void _handleimudata(const sensor_msgs::Imu& data)
@@ -180,6 +182,12 @@ protected:
         trans.setRotation(qua);
         br.sendTransform(tf::StampedTransform(trans,ros::Time::now(),"map","base_link"));
     }
+
+    void _saveimupose(const Eigen::Vector3d& pos)
+    {
+        static std::ofstream ofile("/home/tlg/Document/Sources/rosprj/imupose.txt");
+        ofile << pos.x() << " " << pos.y() << " " << pos.z() << std::endl;
+    }
 protected:
     ros::Publisher  _pub;
     ros::Subscriber _sub;
@@ -191,7 +199,7 @@ protected:
     ImuStatus                         imustatus;
 };
 
-
+using ImuSimVector = std::vector<ImuHandler::ImuData>;
 class PathHandler final
 {
 public:
@@ -260,7 +268,34 @@ protected:
     nav_msgs::Path _path;
 };
 
+void LoadSimData(const std::string& str, ImuSimVector& imudatas)
+{
+    std::ifstream file(str);
+    while(!file.eof())
+    {
+        std::string str;
+        std::getline(file,str);
+        double time;
+        double quaw,quax,quay,quaz;
+        double posx,posy,posz;
+        double gyrx,gyry,gyrz;
+        double accx,accy,accz;
 
+        sscanf(str.c_str(),"%lf%lf%lf%lf%lf%lf%lf%lf%lf%lf%lf%lf%lf%lf",&time, 
+                                                          &quaw, &quax, &quay, &quaz,
+                                                          &posx,&posy,&posz,
+                                                          &gyrx,&gyry,&gyrz,
+                                                          &accx,&accy,&accz);
+
+        ImuHandler::ImuData dataitem;
+        dataitem.time = time;
+        dataitem.pos  = Eigen::Vector3d(posx, posy, posz);
+        dataitem.acc  = Eigen::Vector3d(accx, accy, accz);
+        dataitem.gyro = Eigen::Vector3d(gyrx, gyry, gyrz);
+
+        imudatas.push_back(dataitem);
+    }
+}
 int main(int argc, char** argv)
 {
     ros::init(argc, argv, "imu_handle_node");
@@ -270,14 +305,35 @@ int main(int argc, char** argv)
 
     ros::Rate rate(10);
 
-    PathHandler path(node);
+    
+    ImuSimVector  imudatas;
+    //加载imu模拟数据
+    LoadSimData("/home/tlg/Document/Sources/rosprj/imu_pose.txt",imudatas);
 
+    PathHandler path(node);
+    int index = 0;
+    ImuHandler::ImuData predata = imudatas[0];
+    ImuHandler::ImuData curdata = imudatas[1];
      while(node.ok())
      {
- 
-         //geometry_msgs::Quaternion qua = tf::createQuaternionMsgFromYaw(th);
- 
-         //path.pushpoint(qua,x,y);
+        #if 0  //计算IMU数据
+        if(index < imudatas.size())
+        {
+            sensor_msgs::Imu tempitem;
+            tempitem.header.stamp =  ros::Time(imudatas[index].time);
+            tempitem.linear_acceleration.x = imudatas[index].acc.x();
+            tempitem.linear_acceleration.y = imudatas[index].acc.y();
+            tempitem.linear_acceleration.z = imudatas[index].acc.z();
+            
+            tempitem.angular_velocity.x    = imudatas[index].gyro.x();
+            tempitem.angular_velocity.y    = imudatas[index].gyro.y();
+            tempitem.angular_velocity.z    = imudatas[index].gyro.z();
+            ++index;
+            handler._calimupose(tempitem);
+        }
+        #endif
+    
+
 
          ros::spinOnce();
          rate.sleep();

@@ -13,8 +13,9 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp
   std_msgs
   sensor_msgs
+  visualization_msgs
 )
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14 -g ")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -g ")
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
 
@@ -138,7 +139,7 @@ include_directories(
 ## The recommended prefix ensures that target names across packages don't collide
 
 add_executable(${PROJECT_NAME}_node src/gpstrace.cpp)
-
+add_executable(imu_show_node src/imustatus.cpp)
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
 ## target back to the shorter version for ease of user use
@@ -154,6 +155,9 @@ add_executable(${PROJECT_NAME}_node src/gpstrace.cpp)
    ${catkin_LIBRARIES}
    ${PCL_LIBRARIES}
  )
+ target_link_libraries(imu_show_node
+ ${catkin_LIBRARIES}
+ ${PCL_LIBRARIES})
 
 #############
 ## Install ##
