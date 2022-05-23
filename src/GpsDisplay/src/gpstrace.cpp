@@ -102,7 +102,6 @@ void gprmccallback(const nmea_msgs::Sentence& data)
     }
 } 
 
-
 void imucallback(const sensor_msgs::Imu& data)
 {
     std::stringstream ss;
@@ -129,11 +128,11 @@ int main(int argc, char **argv)
 
     ROS_INFO("begin to get nmea data");
 
-    ros::Subscriber gpssub = handle.subscribe("/nmea_sentence",100,gprmccallback);
+    ros::Subscriber gpssub = handle.subscribe("/nmea_sentence",10,gprmccallback);
 
-    ros::Subscriber imusub = handle.subscribe("/imu_raw",100,imucallback);
+    ros::Subscriber imusub = handle.subscribe("/imu_raw",10,imucallback);
 
-    ros::Rate rate(100);
+    ros::Rate rate(1);
     //ros::WallRate rate(100);
     while(ros::ok())
     {

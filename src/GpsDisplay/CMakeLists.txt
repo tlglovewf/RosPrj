@@ -140,6 +140,7 @@ include_directories(
 
 add_executable(${PROJECT_NAME}_node src/gpstrace.cpp)
 add_executable(imu_show_node src/imustatus.cpp)
+add_executable(typel_imu src/typel.cpp)
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
 ## target back to the shorter version for ease of user use
@@ -156,6 +157,10 @@ add_executable(imu_show_node src/imustatus.cpp)
    ${PCL_LIBRARIES}
  )
  target_link_libraries(imu_show_node
+ ${catkin_LIBRARIES}
+ ${PCL_LIBRARIES})
+
+ target_link_libraries(typel_imu
  ${catkin_LIBRARIES}
  ${PCL_LIBRARIES})
 

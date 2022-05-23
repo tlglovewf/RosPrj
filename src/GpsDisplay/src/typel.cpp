@@ -1,7 +1,6 @@
 #include <ros/ros.h>
 #include <nav_msgs/Path.h>
 #include <sensor_msgs/Imu.h>
-#include <sensor_msgs/NavSatFix.h>
 #include <visualization_msgs/Marker.h>
 #include <tf/transform_broadcaster.h>
 
@@ -41,8 +40,8 @@ public:
 
        Eigen::Vector3d      grav        = Eigen::Vector3d(0,0,9.81);
 
-       Eigen::Vector3d      speed       = Eigen::Vector3d(0,6.28319,3.14159);
-       Eigen::Quaterniond   qua         = Eigen::Quaterniond(0.99875, 0.0499792, 0, 0);
+       Eigen::Vector3d      speed       = Eigen::Vector3d(0,0,0);
+       Eigen::Quaterniond   qua         = Eigen::Quaterniond(1, 0, 0, 0);
 
        Eigen::Quaterniond   pose        = Eigen::Quaterniond(1,0,0,0);
        //add cov 
@@ -51,9 +50,12 @@ public:
     struct ImuData
     {
         double          time;
-        Eigen::Vector3d pos;
+        Eigen::Vector3d rpy;
+        
         Eigen::Vector3d gyro;
         Eigen::Vector3d acc;
+
+        Eigen::Vector3d pos;
     };
 
 public:
@@ -80,12 +82,12 @@ public:
         //中指积分
         Eigen::Vector3d half_gyro = (predata.gyro + curdata.gyro) * 0.5 - imustatus.gyro_bias;  
         
-        Eigen::Vector3d un_acc_0 = imustatus.qua * (predata.acc - imustatus.acc_bias) - imustatus.grav ;
+        Eigen::Vector3d un_acc_0 = imustatus.qua * (predata.acc - imustatus.acc_bias) ;//- imustatus.grav ;
 
         imustatus.qua = imustatus.qua * deltaQ(half_gyro * dt);
         imustatus.qua.normalize();
 
-        Eigen::Vector3d un_acc_1 = imustatus.qua  * (curdata.acc - imustatus.acc_bias) - imustatus.grav;
+        Eigen::Vector3d un_acc_1 = imustatus.qua  * (curdata.acc - imustatus.acc_bias) ;// - imustatus.grav;
 
         Eigen::Vector3d un_acc = 0.5 * (un_acc_0 + un_acc_1);
 
@@ -97,28 +99,24 @@ public:
  
         ss << dt << " " << imustatus.pos.x() << " " << imustatus.pos.y() << " " << imustatus.pos.z() << std::endl;
         _saveimupose(imustatus.pos);
-        ROS_INFO(ss.str().c_str());
+        // ROS_INFO(ss.str().c_str());
     }
-    
+
+
     void _calimupose(const sensor_msgs::Imu& data)
     {
         static int index = 0;
         static ImuData lastdata;
         static ImuData curdata;
-        imustatus.pose =  Eigen::Quaterniond(data.orientation.w,data.orientation.x,data.orientation.y,data.orientation.z);
+        imustatus.pose = Eigen::Quaterniond(data.orientation.w,data.orientation.x,data.orientation.y,data.orientation.z);
         if(index++ < 1)
         {
             lastdata.acc  =  Eigen::Vector3d(data.linear_acceleration.x, data.linear_acceleration.y, data.linear_acceleration.z);
             lastdata.gyro =  Eigen::Vector3d(data.angular_velocity.x,data.angular_velocity.y,data.angular_velocity.z);
             lastdata.time =  data.header.stamp.toSec();
+            imustatus.qua = imustatus.pose;
+            imustatus.speed = Eigen::Vector3d( -0.0234549716,-0.000400833029,0.00864264462);
             curdata = lastdata;
-            //  double roll, pitch, yaw;
-            // tf::Quaternion orientation;
-            // tf::quaternionMsgToTF(data.orientation, orientation);
-            // tf::Matrix3x3(orientation).getRPY(roll, pitch, yaw);
-            // imustatus.qua = imustatus.pose ;
-            // imustatus.speed = Eigen::Vector3d::Zero();
-            // ROS_INFO((std::to_string(roll) + " " + std::to_string(pitch) + " " + std::to_string(yaw)).c_str());
             return;
         }
         else
@@ -196,7 +194,9 @@ public:
         static std::ofstream ofile("/home/tlg/Document/Sources/rosprj/imupose.txt");
         ofile << pos.x() << " " << pos.y() << " " << pos.z() << std::endl;
     }
-    ImuStatus                         imustatus;
+
+public:
+ ImuStatus                         imustatus;
 protected:
     ros::Publisher  _pub;
     ros::Subscriber _sub;
@@ -205,103 +205,92 @@ protected:
     // 建立 pcl 点云
     pcl::PointCloud<pcl::PointXYZRGB> cloud;
 
-    
+   
 };
+#define D2R 0.0174532925388889
+#define R2D 57.29577945088757
+
+// euler2Rotation:   body frame to interitail frame
+Eigen::Quaterniond euler2Rotation( Eigen::Vector3d  eulerAngles)
+{
+    double roll = D2R * eulerAngles(0);
+    double pitch = D2R * eulerAngles(1);
+    double yaw = D2R * eulerAngles(2);
+    // Abbreviations for the various angular functions
+    double cy = cos(yaw * 0.5);
+    double sy = sin(yaw * 0.5);
+    double cp = cos(pitch * 0.5);
+    double sp = sin(pitch * 0.5);
+    double cr = cos(roll * 0.5);
+    double sr = sin(roll * 0.5);
+
+    Eigen::Quaterniond q;
+    q.w() = cr * cp * cy + sr * sp * sy;
+    q.x() = sr * cp * cy - cr * sp * sy;
+    q.y() = cr * sp * cy + sr * cp * sy;
+    q.z() = cr * cp * sy - sr * sp * cy;
+
+    return q;
+}
+
+Eigen::Vector3d ToEulerAngles(const Eigen::Quaterniond& q) {
+    Eigen::Vector3d angles;    //roll pitch yaw
+    const auto x = q.x();
+    const auto y = q.y();
+    const auto z = q.z();
+    const auto w = q.w();
+
+    // roll (x-axis rotation)
+    double sinr_cosp = 2 * (w * x + y * z);
+    double cosr_cosp = 1 - 2 * (x * x + y * y);
+    angles[0] = std::atan2(sinr_cosp, cosr_cosp);
+
+    // pitch (y-axis rotation)
+    double sinp = 2 * (w * y - z * x);
+    if (std::abs(sinp) >= 1)
+        angles[1] = std::copysign(M_PI / 2, sinp); // use 90 degrees if out of range
+    else
+        angles[1] = std::asin(sinp);
+
+    // yaw (z-axis rotation)
+    double siny_cosp = 2 * (w * z + x * y);
+    double cosy_cosp = 1 - 2 * (y * y + z * z);
+    angles[2] = std::atan2(siny_cosp, cosy_cosp);
+
+
+    return angles;
+}
 
 using ImuSimVector = std::vector<ImuHandler::ImuData>;
-class PathHandler final
-{
-public:
-    PathHandler(ros::NodeHandle& node, std::string frame_id = "map")
-    {
-        //initlization
-        _pathpub = node.advertise<nav_msgs::Path>("pathline",1,true);
-        _dirpub  = node.advertise<visualization_msgs::Marker>("pathlinearrow",1);
-        _path.header.stamp = ros::Time::now();
-        
-        _path.header.frame_id = frame_id;
-
-    }
-
-    void pushpoint(const geometry_msgs::Quaternion &qua,double x, double y, double z = 0)
-    {
-        geometry_msgs::PoseStamped this_pose;
-        this_pose.pose.position.x = x;
-        this_pose.pose.position.y = y;
-        this_pose.pose.position.z = z;
-        this_pose.pose.orientation = qua;
-        this_pose.header.stamp = ros::Time::now();
-        this_pose.header.frame_id = _path.header.frame_id;
-
-        _path.poses.push_back(this_pose);
-
-        _pathpub.publish(_path);
-
-        insertarrow(this_pose);
-    }
-
-protected:
-
-    void insertarrow(const geometry_msgs::PoseStamped& pose)
-    {
-           visualization_msgs::Marker maker;
-        maker.header.frame_id = "map";
-        maker.header.stamp = ros::Time::now();
-        maker.ns = "basic_shape";
-        maker.id = 0;
-
-        maker.type = visualization_msgs::Marker::ARROW;
-        maker.action = visualization_msgs::Marker::ADD;
-        
-        maker.pose.position = pose.pose.position;
-  
-        maker.pose.orientation = pose.pose.orientation;
-
-        maker.scale.x = 1.0;
-        maker.scale.y = 0.1;
-        maker.scale.z = 0.1;
-
-        maker.color.r = 0;
-        maker.color.g = 1;
-        maker.color.b = 0;
-        maker.color.a = 1;
-
-        maker.lifetime = ros::Duration();
-        ROS_INFO("push one maker info");
-        _dirpub.publish(maker);
-    }
-
-protected:
-    ros::Publisher _pathpub;
-    ros::Publisher _dirpub;
-    nav_msgs::Path _path;
-};
-
-void LoadSimData(const std::string& str, ImuSimVector& imudatas)
+void LoadLvxData(const std::string& str, ImuSimVector& imudatas)
 {
     std::ifstream file(str);
     while(!file.eof())
     {
-        std::string str;
-        std::getline(file,str);
+        std::string line;
+        std::getline(file,line);
         double time;
         double quaw,quax,quay,quaz;
+        double roll,pitch,yaw;
         double posx,posy,posz;
         double gyrx,gyry,gyrz;
         double accx,accy,accz;
+        double lon,lat,alt;
 
-        sscanf(str.c_str(),"%lf%lf%lf%lf%lf%lf%lf%lf%lf%lf%lf%lf%lf%lf",&time, 
-                                                          &quaw, &quax, &quay, &quaz,
-                                                          &posx,&posy,&posz,
+        sscanf(line.c_str(),"%lf%lf%lf%lf%lf%lf%lf%lf%lf%lf%lf%lf%lf%lf%lf%lf",&time, 
+                                                          &roll, &pitch, &yaw,
+                                                          &accx,&accy,&accz,
                                                           &gyrx,&gyry,&gyrz,
-                                                          &accx,&accy,&accz);
+                                                          &lon,&lat,&alt);
 
         ImuHandler::ImuData dataitem;
         dataitem.time = time;
-        dataitem.pos  = Eigen::Vector3d(posx, posy, posz);
+        
+        dataitem.pos  = Eigen::Vector3d(Functions::mector_lon(lon), Functions::mector_lon(lat), alt);
         dataitem.acc  = Eigen::Vector3d(accx, accy, accz);
-        dataitem.gyro = Eigen::Vector3d(gyrx, gyry, gyrz);
-
+        dataitem.gyro = Eigen::Vector3d(gyrx * D2R, gyry * D2R, gyrz * D2R);// 度->弧度<四元数对应的旋转轴的弧度>
+        dataitem.rpy  = Eigen::Vector3d(roll,pitch,yaw);
+        
         imudatas.push_back(dataitem);
     }
 }
@@ -337,15 +326,49 @@ visualization_msgs::Marker RvizDrawMaker(const Eigen::Quaterniond& qua,const Eig
 
     maker.lifetime = ros::Duration();
 
+
     tf::Transform trans;
-    trans.setOrigin(tf::Vector3(pos.x(), pos.y(), pos.z()));
+    trans.setOrigin(tf::Vector3(pos.x(),pos.y(),pos.z()));
     tf::Quaternion qa(qua.x(),qua.y(),qua.z(),qua.w());
     trans.setRotation(qa);
     br.sendTransform(tf::StampedTransform(trans,ros::Time::now(),"map","base_link"));
     return std::move(maker);
 }
 
+void drawPointAndAxis(const Eigen::Quaterniond& qua, double x, double y, double z, ros::Publisher &pub)
+{
+    static pcl::PointCloud<pcl::PointXYZRGB> tempcloud;
+    static int index = 0;
+    static pcl::PointXYZRGB originpt;
+    if(index++ == 0)
+    {
+        originpt.x = x;
+        originpt.y = y;
+        originpt.z = z;
+        originpt.r = 255.0;
+        originpt.g = 0.0;
+        originpt.b = 0.0;
+    }
+    pcl::PointXYZRGB point;
+    point.x = x - originpt.x;
+    point.y = y - originpt.y;
+    point.z = z - originpt.z;
 
+    point.r = 0.0;
+    point.g = 255.0;
+    point.b = 0.0;
+    tempcloud.points.push_back(point);
+
+    sensor_msgs::PointCloud2 output_msg;
+    output_msg.header.stamp = ros::Time::now();
+     // 将pcl点云转化为ros消息发布
+    pcl::toROSMsg(tempcloud, output_msg);
+      // 发布的点云坐标系 rviz中需要对应着修改
+    output_msg.header.frame_id = "map";
+    pub.publish(output_msg);
+
+    RvizDrawMaker(qua,Eigen::Vector3d(point.x,point.y,point.z));
+}
 
 int main(int argc, char** argv)
 {
@@ -353,47 +376,47 @@ int main(int argc, char** argv)
     ros::NodeHandle node;
     
     ImuHandler handler;
-
-    ros::Rate rate(100);
+    
+    int irate = 20;
+    if(argc > 1) irate = atoi(argv[1]);
+    ROS_INFO(("Rate : " + std::to_string(irate)).c_str());
+    ros::Rate rate(irate);
     
     ImuSimVector  imudatas;
 
     //加载imu模拟数据
-    LoadSimData("/home/tlg/Document/Sources/rosprj/imu_pose.txt",imudatas);
+    LoadLvxData("/home/tlg/Document/Datas/L0999.txt",imudatas);
+    
+    auto _gps = node.advertise<sensor_msgs::PointCloud2>("gpstrace",10);
 
-    PathHandler path(node);
- 
-    auto _pub = node.advertise<visualization_msgs::Marker>("imudirmaker",10);
-  
     int index = 0;
-    //ros::spin();
+
     while(node.ok())
     {
-      #if 1 //计算IMU数据
-      if(index < imudatas.size())
-      {
-          sensor_msgs::Imu tempitem;
-          tempitem.header.stamp =  ros::Time(imudatas[index].time);
-          tempitem.linear_acceleration.x = imudatas[index].acc.x();
-          tempitem.linear_acceleration.y = imudatas[index].acc.y();
-          tempitem.linear_acceleration.z = imudatas[index].acc.z();
+       if(index < imudatas.size())
+       {
+           sensor_msgs::Imu tempitem;
+           tempitem.header.stamp =  ros::Time(imudatas[index].time);
+           tempitem.linear_acceleration.x = imudatas[index].acc.x();
+           tempitem.linear_acceleration.y = imudatas[index].acc.y();
+           tempitem.linear_acceleration.z = imudatas[index].acc.z();
+           
+           tempitem.angular_velocity.x    = imudatas[index].gyro.x();
+           tempitem.angular_velocity.y    = imudatas[index].gyro.y();
+           tempitem.angular_velocity.z    = imudatas[index].gyro.z();
           
-          tempitem.angular_velocity.x    = imudatas[index].gyro.x();
-          tempitem.angular_velocity.y    = imudatas[index].gyro.y();
-          tempitem.angular_velocity.z    = imudatas[index].gyro.z();
-          ++index;
-          handler._calimupose(tempitem);
+           auto temp =  /*Eigen::Quaterniond*/(euler2Rotation(imudatas[index].rpy));
+           tempitem.orientation.w = temp.w();
+           tempitem.orientation.x = temp.x();
+           tempitem.orientation.y = temp.y();
+           tempitem.orientation.z = temp.z();
+           handler._calimupose(tempitem);
 
-          auto result = RvizDrawMaker(handler.imustatus.qua,handler.imustatus.pos);
-         
-          _pub.publish(result);
-      }
-      #endif
-    
-
-
-       ros::spinOnce();
-       rate.sleep();
+           drawPointAndAxis(temp, imudatas[index].pos.y(), imudatas[index].pos.x(), imudatas[index].pos.z(), _gps);
+            ++index;
+       }
+        ros::spinOnce();
+        rate.sleep();
     }
 
     return 0;
